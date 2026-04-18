@@ -7,7 +7,8 @@
  * Main entry point and game loop state management for the interactive
  * Anteater Chess program. Orchestrates initialization, rendering, and 
  * the main execution loop for the game engine. Implements persistent I/O
- * game logging with asynchronous POSIX signal handling for safe termination.
+ * game logging with asynchronous POSIX signal handling for safe termination,
+ * and outputs terminal notifications for captures and special moves.
  *****************************************************************************/
 
 #include <stdio.h>
@@ -20,7 +21,7 @@
 
 //=============================================================================
 
-#define SZCODEVERSION "1.1.0"
+#define SZCODEVERSION "1.2.0"
 #define MAX_INPUT_LENGTH 32
 
 /* Global file pointer required for asynchronous access within the signal handler */
@@ -44,15 +45,11 @@ void HandleSigInt(int sig)
 }
 
 /*
- * Static helper to handle file I/O for game logging. 
+ * Static helper to handle file I/O for game logging and terminal UX events. 
  * Must be invoked PRIOR to ApplyMove() to accurately deduce capture states.
  */
 static void LogMove(FILE* logFile, Board* pBoard, int turnCount, char color, int fRow, int fCol, int tRow, int tCol)
 {
-    if (!logFile) {
-        return;
-    }
-
     Piece mover = pBoard->grid[fRow][fCol];
     Piece target = pBoard->grid[tRow][tCol];
 
@@ -62,34 +59,40 @@ static void LogMove(FILE* logFile, Board* pBoard, int turnCount, char color, int
     int tRankStr = tRow + 1;
 
     const char* colorStr = (color == 'w') ? "White" : "Black";
+    const char* enemyStr = (color == 'w') ? "Black" : "White";
     char flags[64] = "";
 
-    /* Evaluate state prior to ApplyMove mutation to deduce optional flags */
+    /* Evaluate state prior to ApplyMove mutation to deduce optional flags and print UX events */
     if (mover.type == 'K' && abs(tCol - fCol) == 2) {
         strcpy(flags, " (Castling)");
     }
     else if (mover.type == 'A' && target.type == 'P' && target.color != color) {
         strcpy(flags, " (Anteater Capture)");
+        printf("\n>>> %s Anteater devoured enemy ants! <<<\n", colorStr);
     }
     else if (mover.type == 'P' && IsEnPassant(pBoard, fRow, fCol, tRow, tCol, color)) {
         strcpy(flags, " (En Passant)");
+        printf("\n>>> %s Pawn captured via En Passant! <<<\n", colorStr);
     }
     else {
         /* Standard capture detection: target square contains an enemy piece */
         if (target.type != ' ' && target.color != color) {
             strcat(flags, " (Capture)");
+            printf("\n>>> %s captured %s's %c! <<<\n", colorStr, enemyStr, target.type);
         }
         
         /* Promotion can occur simultaneously with a standard capture */
         if (mover.type == 'P' && ((color == 'w' && tRow == ROWS - 1) || (color == 'b' && tRow == 0))) {
             strcat(flags, " (Promotion)");
+            printf("\n>>> %s Pawn was promoted to a Queen! <<<\n", colorStr);
         }
     }
 
-    fprintf(logFile, "%d. %s: %c%d -> %c%d%s\n", turnCount, colorStr, fFileStr, fRankStr, tFileStr, tRankStr, flags);
-    
-    /* Flush buffer immediately to prevent data loss on SIGINT or hard crash */
-    fflush(logFile);
+    if (logFile) {
+        fprintf(logFile, "%d. %s: %c%d -> %c%d%s\n", turnCount, colorStr, fFileStr, fRankStr, tFileStr, tRankStr, flags);
+        /* Flush buffer immediately to prevent data loss on SIGINT or hard crash */
+        fflush(logFile);
+    }
 }
 
 int main()
