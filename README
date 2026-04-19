@@ -1,0 +1,43 @@
+Anteater Chess
+A fun variation of chess on a 8 x 10 board which introduces a new piece, the Anteater, which fundamentally changes how traditional chess is played with its unique moveset of eating consequtive pawns in a row.
+Test your skills against three varying difficulties of bots or play against your friends.
+
+Authors
+Jonghyun Choi
+Vinh Nguyen
+Hamza Faisal
+Richard Nguyen
+William Kuang
+Kun Liang
+
+Version History
+
+0.3 (Alpha Release) (April 20 2026)
+Refined and implemented ChessAI medium and hard difficulties
+Added README, INSTALL
+Updated Makefile
+Refined terminal flow
+Implemented game log
+
+0.2 (April 13 2026)
+Implemented ChessAI Easy Difficulty
+Added MovePiece and AnteaterCapture Functions
+Added MoveValidation MoveList logic
+Refined main terminal flow
+
+0.1 (April 06 2026)
+Added Makefile
+Initial Release
+Copyright
+
+General Instructions
+1.  The user starts the Anteater Chess program through the terminal interface.
+2a. Upon launching the program, select to play against a bot or against a friend. 
+2b. If playing against a bot select a side (white or black).
+3.  Inputs moves using coordinate notation (e.g., F2 F4).
+4a. After each move the system validates the input and updates the board.
+4b. If playing against a bot The computer generates and executes its move.
+5.  Checkmate the opposing King to Win!
+
+
+This project is licensed under the MIT License - see the LICENSE file for details
