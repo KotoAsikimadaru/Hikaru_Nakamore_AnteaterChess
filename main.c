@@ -18,10 +18,11 @@
 #include "GameData.h"
 #include "MoveValidation.h"
 #include "ChessAI.h"
+#include "GUI.h"
 
 //=============================================================================
 
-#define SZCODEVERSION "1.2.0"
+#define SZCODEVERSION "2.0.0"
 #define MAX_INPUT_LENGTH 32
 
 /* Global file pointer required for asynchronous access within the signal handler */
@@ -95,82 +96,27 @@ static void LogMove(FILE* logFile, Board* pBoard, int turnCount, char color, int
     }
 }
 
-int main()
+/* * Encapsulated procedural loop handling terminal I/O.
+ * Isolated to prevent blocking GTK's asynchronous event handling.
+ */
+void RunTerminalGame(Board* pBoard, char gameMode, char aiDifficulty, char playerColor)
 {
-    /* Register the signal handler for terminal interruptions */
-    signal(SIGINT, HandleSigInt);
-
-    /* Initializing the game board */
-    Board gameBoard;
-    InitializeBoard(&gameBoard);
-
-    /* Prompts user for mode selection */
-    char playerColor = ' ', gameMode = ' ', aiDifficulty = ' ';
-    printf("Welcome to Anteater Chess by Team Hikaru Naka-more!\n");
-
-    while (gameMode != '1' && gameMode != '2') {
-        printf("\nPlease Select Mode\n1. Play a Friend\n2. Play Bots\n");
-
-        /* Handle invalid input and clear stdin buffer */
-        if (scanf(" %c", &gameMode) != 1) {
-            while (getchar() != '\n');
-        }
-    }
-
-    /* Skip side selection if PvP */
-    if (gameMode == '1') {
-        playerColor = 'w';
-    }
-    /* Prompts user for ai difficulty */
-    else if (gameMode == '2') {
-        while (aiDifficulty != '1' && aiDifficulty != '2' && aiDifficulty != '3') {
-            printf("\nPlease Select Difficulty\n1. Easy\n2. Medium\n3. Hard\n");
-
-            if (scanf(" %c", &aiDifficulty) != 1) {
-                while (getchar() != '\n');
-            }
-        }
-    }
-
-    /* Prompt the user for side selection */
-    while (playerColor != 'w' && playerColor != 'b') {    
-        printf("\nPlease choose your side ('w' for white / 'b' for black): ");
-        
-        if (scanf(" %c", &playerColor) != 1) {
-            while (getchar() != '\n');
-        }
-    }
-
-    /* Clean up dangling \n after successful scanf */
-    while (getchar() != '\n');
-
-    /* Initialize file I/O for game logging */
-    g_pLogFile = fopen("game_log.txt", "w");
-    if (!g_pLogFile) {
-        printf("CRITICAL WARNING: Unable to open game_log.txt for writing.\n");
-    }
-
-    /* Setup game variables */
     char moveInput[MAX_INPUT_LENGTH];
     char currentTurn = 'w';
     char fromCol, toCol;
     int fromRow, toRow, gameOver = 0;
     int fullTurnCount = 1;
 
-    /* Begin game */
     while (!gameOver) {
-        PrintBoard(&gameBoard);
+        PrintBoard(pBoard);
 
-        /* Pre-turn State Evaluation */
-        if (IsInCheck(&gameBoard, currentTurn)) {
-            if (IsCheckmate(&gameBoard, currentTurn)) {
+        if (IsInCheck(pBoard, currentTurn)) {
+            if (IsCheckmate(pBoard, currentTurn)) {
                 printf("\nCHECKMATE! %s wins the game.\n", (currentTurn == 'w') ? "Black" : "White");
-                
                 if (g_pLogFile) {
                     fprintf(g_pLogFile, "{Game Over: %s wins by Checkmate}\n", (currentTurn == 'w') ? "Black" : "White");
                     fflush(g_pLogFile);
                 }
-                
                 gameOver = 1;
                 break;
             }
@@ -183,27 +129,19 @@ int main()
             
             if (fgets(moveInput, sizeof(moveInput), stdin) != NULL) {
                 if (sscanf(moveInput, " %c%d %c%d", &fromCol, &fromRow, &toCol, &toRow) == 4) {
-                    /* ASCII conversion */
                     int fCol = fromCol - (fromCol >= 'a' ? 'a' : 'A');
                     int fRow = fromRow - 1;
                     int tCol = toCol - (toCol >= 'a' ? 'a' : 'A');
                     int tRow = toRow - 1;
 
-                    /* Validate bounds before accessing board array */
                     if ((fRow >= 0 && fRow < ROWS) && (tRow >= 0 && tRow < ROWS) && 
                         (fCol >= 0 && fCol < COLS) && (tCol >= 0 && tCol < COLS)) {
                             
-                        if (IsValidMove(&gameBoard, fRow, fCol, tRow, tCol, currentTurn)) {
+                        if (IsValidMove(pBoard, fRow, fCol, tRow, tCol, currentTurn)) {
+                            LogMove(g_pLogFile, pBoard, fullTurnCount, currentTurn, fRow, fCol, tRow, tCol);
+                            ApplyMove(pBoard, fRow, fCol, tRow, tCol);
                             
-                            /* Call LogMove before applying state mutations to deduce capture data */
-                            LogMove(g_pLogFile, &gameBoard, fullTurnCount, currentTurn, fRow, fCol, tRow, tCol);
-                            
-                            ApplyMove(&gameBoard, fRow, fCol, tRow, tCol);
-                            
-                            /* Standard chess turns increment after Black completes their move */
-                            if (currentTurn == 'b') {
-                                fullTurnCount++;
-                            }
+                            if (currentTurn == 'b') fullTurnCount++;
                             currentTurn = (currentTurn == 'w') ? 'b' : 'w';
                         }
                         else {
@@ -219,7 +157,6 @@ int main()
                 }
             }
             else {
-                /* Synchronous EOF capture (e.g., Ctrl+D) */
                 printf("\nInput stream closed. Exiting game.\n");
                 if (g_pLogFile) {
                     fprintf(g_pLogFile, "{Game terminated via keyboard interruption (EOF)}\n");
@@ -229,36 +166,81 @@ int main()
             }
         }
         else {
-            Move aiMove = DetermineAIMove(&gameBoard, currentTurn, aiDifficulty);
+            Move aiMove = DetermineAIMove(pBoard, currentTurn, aiDifficulty);
             
-            /* Safety check to ensure the bot generated a coordinate */
-            if (aiMove.fRow != 0 || aiMove.fCol != 0
-                || aiMove.tRow != 0 || aiMove.tCol != 0
-                || gameBoard.grid[0][0].type != ' ') {
-                
-                /* UX Enhancement: Announce the bot's generated move to the terminal */
+            if (aiMove.fRow != 0 || aiMove.fCol != 0 || aiMove.tRow != 0 || aiMove.tCol != 0 || pBoard->grid[0][0].type != ' ') {
                 printf("\nBot played: %c%d -> %c%d\n", 
                        (char)(aiMove.fCol + 'A'), aiMove.fRow + 1, 
                        (char)(aiMove.tCol + 'A'), aiMove.tRow + 1);
 
-                LogMove(g_pLogFile, &gameBoard, fullTurnCount, currentTurn, aiMove.fRow, aiMove.fCol, aiMove.tRow, aiMove.tCol);
-                ApplyMove(&gameBoard, aiMove.fRow, aiMove.fCol, aiMove.tRow, aiMove.tCol);
+                LogMove(g_pLogFile, pBoard, fullTurnCount, currentTurn, aiMove.fRow, aiMove.fCol, aiMove.tRow, aiMove.tCol);
+                ApplyMove(pBoard, aiMove.fRow, aiMove.fCol, aiMove.tRow, aiMove.tCol);
                 
-                if (currentTurn == 'b') {
-                    fullTurnCount++;
-                }
+                if (currentTurn == 'b') fullTurnCount++;
                 currentTurn = (currentTurn == 'w') ? 'b' : 'w';
             }
-            /* Should only trigger if checkmate logic failed to catch endgame state */
             else {
                 gameOver = 1;
             }
         }
     }
+}
 
-    if (g_pLogFile) {
-        fclose(g_pLogFile);
+int main(int argc, char *argv[])
+{
+    /* Register the signal handler for terminal interruptions */
+    signal(SIGINT, HandleSigInt);
+
+    /* Initializing the game board */
+    Board gameBoard;
+    InitializeBoard(&gameBoard);
+
+    char uiMode = ' ', gameMode = ' ', aiDifficulty = ' ', playerColor = ' ';
+    printf("Welcome to Anteater Chess by Team Hikaru Naka-more!\n");
+
+    /* Prompt user for game display mode */  
+    while (uiMode != '1' && uiMode != '2') {
+        printf("\nPlease Select Your Preferred Game Display\n1. Terminal\n2. GUI\n");
+        if (scanf(" %c", &uiMode) != 1) while (getchar() != '\n');
     }
+
+    /* Prompt user for game mode (PvP / PvE) */  
+    while (gameMode != '1' && gameMode != '2') {
+        printf("\nPlease Select Mode\n1. Play a Friend\n2. Play Bots\n");
+        if (scanf(" %c", &gameMode) != 1) while (getchar() != '\n');
+    }
+
+    if (gameMode == '1') {
+        playerColor = 'w';
+    }
+    else if (gameMode == '2') {
+        while (aiDifficulty != '1' && aiDifficulty != '2' && aiDifficulty != '3') {
+            printf("\nPlease Select Difficulty\n1. Easy\n2. Medium\n3. Hard\n");
+            if (scanf(" %c", &aiDifficulty) != 1) while (getchar() != '\n');
+        }
+    }
+
+    /* Prompt user for piece color (PvE ONLY) */  
+    while (playerColor != 'w' && playerColor != 'b') {    
+        printf("\nPlease choose your side ('w' for white / 'b' for black): ");
+        if (scanf(" %c", &playerColor) != 1) while (getchar() != '\n');
+    }
+
+    while (getchar() != '\n');
+
+    g_pLogFile = fopen("game_log.txt", "w");
+    if (!g_pLogFile) {
+        printf("CRITICAL WARNING: Unable to open game_log.txt for writing.\n");
+    }
+
+    if (uiMode == '1') {
+        RunTerminalGame(&gameBoard, gameMode, aiDifficulty, playerColor);
+    }
+    else {
+        StartGUI(argc, argv, &gameBoard);
+    }
+
+    if (g_pLogFile) fclose(g_pLogFile);
 
     return 0;
 }
