@@ -52,47 +52,78 @@ void HandleSigInt(int sig)
  */
 static void LogMove(FILE* logFile, Board* pBoard, int turnCount, char color, int fRow, int fCol, int tRow, int tCol)
 {
-    Piece mover = pBoard->grid[fRow][fCol];
+    Piece mover  = pBoard->grid[fRow][fCol];
     Piece target = pBoard->grid[tRow][tCol];
-
-    char fFileStr = (char)(fCol + 'A');
-    int fRankStr = fRow + 1;
-    char tFileStr = (char)(tCol + 'A');
-    int tRankStr = tRow + 1;
 
     const char* colorStr = (color == 'w') ? "White" : "Black";
     const char* enemyStr = (color == 'w') ? "Black" : "White";
-    char flags[64] = "";
 
-    /* Evaluate state prior to ApplyMove mutation to deduce optional flags and print UX events */
+    char san[16] = "";
+    int  pos = 0;
+
+    /* castling */
     if (mover.type == 'K' && abs(tCol - fCol) == 2) {
-        strcpy(flags, " (Castling)");
+        strcpy(san, (tCol > fCol) ? "O-O" : "O-O-O");
     }
-    else if (mover.type == 'A' && target.type == 'P' && target.color != color) {
-        strcpy(flags, " (Anteater Capture)");
-        printf("\n>>> %s Anteater devoured enemy ants! <<<\n", colorStr);
-    }
-    else if (mover.type == 'P' && IsEnPassant(pBoard, fRow, fCol, tRow, tCol, color)) {
-        strcpy(flags, " (En Passant)");
-        printf("\n>>> %s Pawn captured via En Passant! <<<\n", colorStr);
-    }
+    /* all other moves */
     else {
-        /* Standard capture detection: target square contains an enemy piece */
-        if (target.type != ' ' && target.color != color) {
-            strcat(flags, " (Capture)");
-            printf("\n>>> %s captured %s's %c! <<<\n", colorStr, enemyStr, target.type);
+        /* piece letter (omitted for pawns) */
+        if (mover.type != 'P') {
+            san[pos++] = mover.type; // 'K','Q','R','B','N','A' etc.
         }
-        
-        /* Promotion can occur simultaneously with a standard capture */
+
+        /* Disambiguation for pawns on capture (FIDE rules) */
+        int isCapture = (target.type != ' ' && target.color != color)
+                     || (mover.type == 'P' && IsEnPassant(pBoard, fRow, fCol, tRow, tCol, color))
+                     || (mover.type == 'A' && target.type == 'P' && target.color != color);
+
+        if (mover.type == 'P' && isCapture) {
+            /* pawns always show source file when capturing */
+            san[pos++] = (char)('a' + fCol);
+        }
+
+        /* capture marker */
+        if (isCapture) {
+            san[pos++] = 'x';
+        }
+
+        /* destination line */
+        san[pos++] = (char)('a' + tCol);
+        san[pos++] = (char)('1' + tRow);
+
+        /* promotion suffix */
         if (mover.type == 'P' && ((color == 'w' && tRow == ROWS - 1) || (color == 'b' && tRow == 0))) {
-            strcat(flags, " (Promotion)");
-            printf("\n>>> %s Pawn was promoted to a Queen! <<<\n", colorStr);
+            san[pos++] = '=';
+            san[pos++] = 'Q'; // assumes auto-queen for now
+        }
+
+        san[pos] = '\0';
+        
+        /* unchanged code from prev branch */
+        if (mover.type == 'A' && target.type == 'P' && target.color != color) {
+            printf("\n>>> %s Anteater devoured enemy ants! <<<\n", colorStr);
+        }
+        else if (mover.type == 'P' && IsEnPassant(pBoard, fRow, fCol, tRow, tCol, color)) {
+            printf("\n>>> %s Pawn captured via En Passant! <<<\n", colorStr);
+        }
+        else {
+            if (target.type != ' ' && target.color != color) {
+                printf("\n>>> %s captured %s's %c! <<<\n", colorStr, enemyStr, target.type);
+            }
+            if (mover.type == 'P' && ((color == 'w' && tRow == ROWS - 1) || (color == 'b' && tRow == 0))) {
+                printf("\n>>> %s Pawn was promoted to a Queen! <<<\n", colorStr);
+            }
         }
     }
 
     if (logFile) {
-        fprintf(logFile, "%d. %s: %c%d -> %c%d%s\n", turnCount, colorStr, fFileStr, fRankStr, tFileStr, tRankStr, flags);
-        /* Flush buffer immediately to prevent data loss on SIGINT or hard crash */
+        /* white move opens the pair, black will close it */
+        if (color == 'w') {
+            fprintf(logFile, "%d. %s ", turnCount, san);
+        }
+        else {
+            fprintf(logFile, "%s\n", san);
+        }
         fflush(logFile);
     }
 }
